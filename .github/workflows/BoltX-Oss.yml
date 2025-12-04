@@ -47,8 +47,9 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🔧 [1/3] Menggunakan defconfig dari repository: sm7435_defconfig"
-          make O=out sm7435_defconfig
+          echo "🔧 [1/3] Menggunakan defconfig dari repository"
+          # Menggunakan defconfig default dari repository
+          make O=out ARCH=arm64 LLVM=1 defconfig
           
           # --- Custom Configs ---
           
@@ -102,8 +103,8 @@ jobs:
       - name: Create AnyKernel3 Flashable Zip
         run: |
           echo "📦 Membuat flashable zip AnyKernel3..."
-          # Clone AnyKernel3 template
-          git clone https://github.com/osm0sis/AnyKernel3 -b master AnyKernel3
+          # Clone AnyKernel3 template tanpa modifikasi manual
+          git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
           
           # Copy kernel image
           cp out/arch/arm64/boot/Image AnyKernel3/
@@ -112,54 +113,15 @@ jobs:
           mkdir -p AnyKernel3/dtbs
           find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
           
-          # Update anykernel.sh untuk perangkat SM7435
-          cat > AnyKernel3/anykernel.sh << 'EOF'
-          # AnyKernel3 Ramdisk Mod Script
-          # by osm0sis @ xda-developers
-
-          ## AnyKernel3 install
-          ## AnyKernel3 flashable zip installer for Xiaomi SM7435 (garnet)
-
-          ## shell variables
-          block=/dev/block/by-name/boot;
-          is_device_device=1;
-          do_addon=1;
-          addon_file=ramdisk-compat.cpio;
-
-          ## dump boot and decompress
-          dump_boot;
-
-          ## patch ramdisk
-          if [ -f $ramdisk/compat.ko ]; then
-            ui_print "Found compat.ko in ramdisk, moving to /system/lib/modules/";
-            mkdir -p $ramdisk/system/lib/modules/;
-            mv $ramdisk/compat.ko $ramdisk/system/lib/modules/;
-          fi;
-
-          ## write modules to ramdisk modules dir
-          if [ -d $ramdisk/modules ]; then
-            ui_print "Adding modules to ramdisk modules dir...";
-            for i in $(find modules -name '*.ko'); do
-              chmod 644 $i;
-              mv $i $ramdisk/modules/;
-            done;
-          fi;
-
-          ## write boot image
-          write_boot;
-
-          ## end install
-          EOF
-          
-          # Buat zip
+          # Buat zip dengan nama kernel branding
           cd AnyKernel3
-          zip -r9 ../BoltX-Oss-5.10.zip *
+          zip -r9 ../${{ env.KERNEL_NAME }}-5.10.zip *
           cd ..
-          echo "✅ Flashable zip berhasil dibuat: BoltX-Oss-5.10.zip"
+          echo "✅ Flashable zip berhasil dibuat: ${{ env.KERNEL_NAME }}-5.10.zip"
           
       - name: Upload AnyKernel3 Flashable Zip
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.KERNEL_NAME }}-5.10-Flashable
-          path: BoltX-Oss-5.10.zip
+          path: ${{ env.KERNEL_NAME }}-5.10.zip
           compression-level: 0 # File sudah terkompresi
