@@ -15,7 +15,7 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          # Menggunakan branch lineage-23.0 untuk Android 15
+          # Menggunakan branch lineage-23.0 untuk Android 15 ,16
           ref: lineage-23.0
           submodules: recursive
           fetch-depth: 1
