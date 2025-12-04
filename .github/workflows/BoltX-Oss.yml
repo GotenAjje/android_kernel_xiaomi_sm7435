@@ -28,13 +28,13 @@ jobs:
           python3 python3-pip lld zip unzip libncurses5-dev \
           libelf-dev zlib1g-dev dwarves
 
-      - name: Setup Toolchain (Clang 20)
+      - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
-          # Menggunakan Clang 20
-          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/62cdcefa89e31af2d72c366e8b5ef8db84caea62/clang-r547379.tar.gz"
+          # PERUBAAN 1: Menggunakan Clang 19 sesuai permintaan
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
-          echo "Downloading Clang 20..."
+          echo "Downloading Clang 19..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
           
       - name: Prepare & Configure Kernel
@@ -47,30 +47,41 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🔧 [1/3] Menggunakan defconfig dari repository"
+          echo "🔧 [1/4] Menggunakan defconfig dari repository"
           # Menggunakan defconfig default dari repository
           make O=out ARCH=arm64 LLVM=1 defconfig
           
           # --- Custom Configs ---
           
           # 1. Set Kernel Name (Branding)
-          echo "🔧 [2/3] Menerapkan branding kernel..."
+          echo "🔧 [2/4] Menerapkan branding kernel..."
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Disable Certificate Signing (Mencegah error keys)
-          echo "🔧 [3/3] Menonaktifkan System Trusted Keys..."
-          scripts/config --file out/.config -d SYSTEM_TRUSTED_KEYS
+          # 2. PERUBAAN 2: Aktifkan Vendor Hooks untuk memperbaiki error driver
+          echo "🔧 [3/4] Mengaktifkan Android Vendor Hooks..."
+          scripts/config --file out/.config -e CONFIG_ANDROID_VENDOR_HOOKS
+          
+          # 3. PERUBAAN 3: Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
+          echo "🔧 [4/4] Menonaktifkan System Trusted Keys..."
+          scripts/config --file out/.config --set-str SYSTEM_TRUSTED_KEYS ""
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
-          scripts/config --file out/.config -d MODULE_SIG
-          scripts/config --file out/.config -d MODULE_SIG_ALL
-          scripts/config --file out/.config -d SYSTEM_BLACKLIST_KEYRING
-          scripts/config --file out/.config -d SYSTEM_BLACKLIST_HASH_LIST
-          scripts/config --file out/.config -d SYSTEM_TRUSTED_KEYRING
-          scripts/config --file out/.config -d SECONDARY_TRUSTED_KEYRING
           
           echo "✅ Konfigurasi kernel selesai."
 
-      - name: Build Kernel Image
+      # PERUBAAN 4: Step baru untuk memperbaiki error driver secara otomatis
+      - name: Fix Driver Compilation Error
+        run: |
+          echo "🔨 Memperbaiki error driver thermal..."
+          # Memodifikasi file thermal_zone_internal.h
+          # Menambahkan #ifdef CONFIG_ANDROID_VENDOR_HOOKS di sekitar baris yang bermasalah
+          # Ini memastikan kode hanya dikompilasi jika Vendor Hooks diaktifkan
+          sed -i '/ret = register_trace_android_vh_disable_thermal_cooling_stats(/i\
+          #ifdef CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
+          sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
+          #endif' drivers/thermal/qcom/thermal_zone_internal.h
+          echo "✅ Driver diperbaiki."
+
+      - name: Build Kernel Image & DTB
         run: |
           # Set Path dan Environment
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
@@ -80,8 +91,11 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🚀 Memulai build kernel Image..."
+          echo "🚀 [1/2] Memulai build kernel Image..."
           make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE Image
+          
+          echo "🚀 [2/2] Memulai build DTB..."
+          make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE dtbs
           
       - name: Check Kernel Version Name
         run: |
@@ -96,6 +110,13 @@ jobs:
           path: out/arch/arm64/boot/Image
           compression-level: 9
           
+      - name: Upload DTB
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.KERNEL_NAME }}-5.10-DTB
+          path: out/arch/arm64/boot/dts/qcom/
+          if-no-files-found: warn
+          
       - name: Create AnyKernel3 Flashable Zip
         run: |
           echo "📦 Membuat flashable zip AnyKernel3..."
@@ -104,6 +125,10 @@ jobs:
           
           # Copy kernel image
           cp out/arch/arm64/boot/Image AnyKernel3/
+          
+          # Copy semua DTB ke folder AnyKernel3
+          mkdir -p AnyKernel3/dtbs
+          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
           
           # Buat zip dengan nama kernel branding
           cd AnyKernel3
