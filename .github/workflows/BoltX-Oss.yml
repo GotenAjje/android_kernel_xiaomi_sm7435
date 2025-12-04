@@ -1,155 +1,38 @@
-name: Build BoltX-Oss Kernel 5.10 (SM7435 - Garnet)
+name: Debug - Cek Defconfig
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  debug:
     runs-on: ubuntu-latest
 
-    env:
-      # Branding kernel
-      KERNEL_NAME: "BoltX-Oss"
-      
     steps:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          # Menggunakan branch lineage-23.0 untuk Android 15 ,16
           ref: lineage-23.0
           submodules: recursive
           fetch-depth: 1
 
-      # --- LANGKAH INI TIDAK PERLU LAGI ---
-      # - name: Checkout Device Repository
-      #   uses: actions/checkout@v4
-      #   with:
-      #     repository: GotenAjje/android_device_xiaomi_garnet
-      #     path: device_repo
-      #     ref: lineage-23.0
-
-      - name: Install Dependencies
+      - name: Cek Isi Directory Configs
         run: |
-          echo "Installing build dependencies..."
-          sudo apt-get update
-          sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
-          python3 python3-pip lld zip unzip libncurses5-dev \
-          libelf-dev zlib1g-dev dwarves
-
-      - name: Setup Toolchain (Clang 19)
-        run: |
-          mkdir -p toolchain/clang
-          # Menggunakan Clang 19 sesuai permintaan
-          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
-          
-          echo "Downloading Clang 19..."
-          curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
-          
-      - name: Prepare & Configure Kernel
-        run: |
-          # Set Path dan Environment
-          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export LLVM=1
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          
-          # --- PERUBAHAN KRUSIAL: Gunakan defconfig yang sudah ada di kernel ---
-          echo "🔧 [1/4] Menggunakan garnet_defconfig yang ada di repository kernel"
-          make O=out ARCH=arm64 LLVM=1 garnet_defconfig
-          
-          # --- Custom Configs ---
-          
-          # 1. Set Kernel Name (Branding)
-          echo "🔧 [2/4] Menerapkan branding kernel..."
-          scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
-          
-          # 2. Aktifkan Vendor Hooks (sudah aktif di garnet_defconfig, tapi untuk jaga-jaga)
-          echo "🔧 [3/4] Memastikan Android Vendor Hooks aktif..."
-          scripts/config --file out/.config -e CONFIG_ANDROID_VENDOR_HOOKS
-          
-          # 3. Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
-          echo "🔧 [4/4] Menonaktifkan System Trusted Keys..."
-          scripts/config --file out/.config --set-str SYSTEM_TRUSTED_KEYS ""
-          scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
-          
-          echo "✅ Konfigurasi kernel selesai."
-
-      - name: Fix Driver Compilation Errors
-        run: |
-          echo "🔨 Memperbaiki bug di driver untuk kompatibilitas Clang 19..."
-          
-          # 1. Perbaiki error 'void function should not return a value' di driver MMC
-          echo "  -> Memperbaiki sdhci-msm.c (line 2872)..."
-          # Mengganti 'return 0;' dengan 'return;' pada fungsi bertipe void
-          sed -i '2872s/return 0;/return;/' drivers/mmc/host/sdhci-msm.c
-          
-          # 2. Perbaiki error syntax dan #endif di driver thermal
-          echo "  -> Memperbaiki thermal_zone_internal.h..."
-          # Membungkus kode yang menggunakan Vendor Hooks dengan #ifdef untuk mencegah error
-          sed -i '/#include <trace\/hooks\/thermal.h>/i\
-          \
-          #ifdef CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
-          # Cari baris unregister dan tambahkan #endif setelahnya
-          sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
-          #endif // CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
-          
-          echo "✅ Semua driver error telah diperbaiki."
-
-      - name: Build Kernel Image & DTB
-        run: |
-          # Set Path dan Environment
-          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
-          export ARCH=arm64
-          export SUBARCH=arm64
-          export LLVM=1
-          export CROSS_COMPILE=aarch64-linux-gnu-
-          export CLANG_TRIPLE=aarch64-linux-gnu-
-          
-          echo "🚀 [1/2] Memulai build kernel Image..."
-          make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE Image
-          
-          echo "🚀 [2/2] Memulai build DTB..."
-          make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE dtbs
-          
-      - name: Check Kernel Version Name
-        run: |
-          echo "ℹ️ Kernel version info:"
-          strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
-
-      - name: Upload Kernel Image
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.KERNEL_NAME }}-5.10-garnet-Image
-          path: out/arch/arm64/boot/Image
-          compression-level: 9
-          
-      - name: Upload DTB
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.KERNEL_NAME }}-5.10-garnet-DTB
-          path: out/arch/arm64/boot/dts/qcom/
-          if-no-files-found: warn
-          
-      - name: Create AnyKernel3 Flashable Zip
-        run: |
-          echo "📦 Membuat flashable zip AnyKernel3..."
-          git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
-          
-          cp out/arch/arm64/boot/Image AnyKernel3/
-          
-          mkdir -p AnyKernel3/dtbs
-          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
-          
-          cd AnyKernel3
-          zip -r9 ../${{ env.KERNEL_NAME }}-5.10-garnet.zip *
-          cd ..
-          echo "✅ Flashable zip berhasil dibuat: ${{ env.KERNEL_NAME }}-5.10-garnet.zip"
-          
-      - name: Upload AnyKernel3 Flashable Zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.KERNEL_NAME }}-5.10-garnet-Flashable
-          path: ${{ env.KERNEL_NAME }}-5.10-garnet.zip
-          compression-level: 0
+          echo "=================================================="
+          echo "🔍 Melihat isi dari arch/arm64/configs/"
+          echo "=================================================="
+          ls -la arch/arm64/configs/
+          echo ""
+          echo "=================================================="
+          echo "🔍 Mencari file yang mengandung kata 'garnet':"
+          echo "=================================================="
+          find arch/arm64/configs/ -name "*garnet*"
+          echo ""
+          echo "=================================================="
+          echo "🔍 Mencari file yang mengandung kata 'sm7435':"
+          echo "=================================================="
+          find arch/arm64/configs/ -name "*sm7435*"
+          echo ""
+          echo "=================================================="
+          echo "🔍 Mencari file yang mengandung kata 'vendor':"
+          echo "=================================================="
+          find arch/arm64/configs/ -name "*vendor*"
