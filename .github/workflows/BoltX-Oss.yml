@@ -1,4 +1,4 @@
-name: Build BoltX-Oss Kernel 5.10 (SM7435)
+name: Build BoltX-Oss Kernel 5.10 (SM7435 - Garnet)
 
 on:
   workflow_dispatch:
@@ -47,32 +47,47 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🔧 [1/5] Menggunakan defconfig dari repository"
-          # Menggunakan defconfig default dari repository
-          make O=out ARCH=arm64 LLVM=1 defconfig
+          echo "🔧 [1/4] Menggunakan defconfig SPESIFIK untuk Garnet (dari repository device)"
+          # PERBAIKAN KRUSIAL: Menggunakan garnet_defconfig yang benar, bukan defconfig generik
+          make O=out ARCH=arm64 LLVM=1 garnet_defconfig
           
           # --- Custom Configs ---
           
           # 1. Set Kernel Name (Branding)
-          echo "🔧 [2/5] Menerapkan branding kernel..."
+          echo "🔧 [2/4] Menerapkan branding kernel..."
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Aktifkan Vendor Hooks untuk memperbaiki error driver
-          echo "🔧 [3/5] Mengaktifkan Android Vendor Hooks..."
+          # 2. Aktifkan Vendor Hooks (sudah aktif di garnet_defconfig, tapi untuk jaga-jaga)
+          echo "🔧 [3/4] Memastikan Android Vendor Hooks aktif..."
           scripts/config --file out/.config -e CONFIG_ANDROID_VENDOR_HOOKS
           
           # 3. Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
-          echo "🔧 [4/5] Menonaktifkan System Trusted Keys..."
+          echo "🔧 [4/4] Menonaktifkan System Trusted Keys..."
           scripts/config --file out/.config --set-str SYSTEM_TRUSTED_KEYS ""
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
           
-          # 4. Nonaktifkan driver thermal QCOM yang tidak diperlukan untuk SM7435 (MediaTek)
-          echo "🔧 [5/5] Menonaktifkan driver thermal QCOM yang tidak kompatibel..."
-          scripts/config --file out/.config -d CONFIG_QCOM_TSENS
-          scripts/config --file out/.config -d CONFIG_THERMAL_QCOM
-          scripts/config --file out/.config -d CONFIG_QCOM_SPMI_TEMP_ALARM
-          
           echo "✅ Konfigurasi kernel selesai."
+
+      - name: Fix Driver Compilation Errors
+        run: |
+          echo "🔨 Memperbaiki bug di driver untuk kompatibilitas Clang 19..."
+          
+          # 1. Perbaiki error 'void function should not return a value' di driver MMC
+          echo "  -> Memperbaiki sdhci-msm.c (line 2872)..."
+          # Mengganti 'return 0;' dengan 'return;' pada fungsi bertipe void
+          sed -i '2872s/return 0;/return;/' drivers/mmc/host/sdhci-msm.c
+          
+          # 2. Perbaiki error syntax dan #endif di driver thermal
+          echo "  -> Memperbaiki thermal_zone_internal.h..."
+          # Membungkus kode yang menggunakan Vendor Hooks dengan #ifdef untuk mencegah error
+          sed -i '/#include <trace\/hooks\/thermal.h>/i\
+          \
+          #ifdef CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
+          # Cari baris unregister dan tambahkan #endif setelahnya
+          sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
+          #endif // CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
+          
+          echo "✅ Semua driver error telah diperbaiki."
 
       - name: Build Kernel Image & DTB
         run: |
@@ -98,40 +113,35 @@ jobs:
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          # Nama artifact mencantumkan versi kernel untuk kejelasan
-          name: ${{ env.KERNEL_NAME }}-5.10-Image
+          name: ${{ env.KERNEL_NAME }}-5.10-garnet-Image
           path: out/arch/arm64/boot/Image
           compression-level: 9
           
       - name: Upload DTB
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KERNEL_NAME }}-5.10-DTB
+          name: ${{ env.KERNEL_NAME }}-5.10-garnet-DTB
           path: out/arch/arm64/boot/dts/qcom/
           if-no-files-found: warn
           
       - name: Create AnyKernel3 Flashable Zip
         run: |
           echo "📦 Membuat flashable zip AnyKernel3..."
-          # Clone AnyKernel3 template tanpa modifikasi manual
           git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
           
-          # Copy kernel image
           cp out/arch/arm64/boot/Image AnyKernel3/
           
-          # Copy semua DTB ke folder AnyKernel3
           mkdir -p AnyKernel3/dtbs
           find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
           
-          # Buat zip dengan nama kernel branding
           cd AnyKernel3
-          zip -r9 ../${{ env.KERNEL_NAME }}-5.10.zip *
+          zip -r9 ../${{ env.KERNEL_NAME }}-5.10-garnet.zip *
           cd ..
-          echo "✅ Flashable zip berhasil dibuat: ${{ env.KERNEL_NAME }}-5.10.zip"
+          echo "✅ Flashable zip berhasil dibuat: ${{ env.KERNEL_NAME }}-5.10-garnet.zip"
           
       - name: Upload AnyKernel3 Flashable Zip
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KERNEL_NAME }}-5.10-Flashable
-          path: ${{ env.KERNEL_NAME }}-5.10.zip
-          compression-level: 0 # File sudah terkompresi
+          name: ${{ env.KERNEL_NAME }}-5.10-garnet-Flashable
+          path: ${{ env.KERNEL_NAME }}-5.10-garnet.zip
+          compression-level: 0
