@@ -31,7 +31,7 @@ jobs:
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
-          # PERUBAAN 1: Menggunakan Clang 19 sesuai permintaan
+          # Menggunakan Clang 19 sesuai permintaan
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
           echo "Downloading Clang 19..."
@@ -57,28 +57,27 @@ jobs:
           echo "🔧 [2/4] Menerapkan branding kernel..."
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. PERUBAAN 2: Aktifkan Vendor Hooks untuk memperbaiki error driver
+          # 2. Aktifkan Vendor Hooks untuk memperbaiki error driver
           echo "🔧 [3/4] Mengaktifkan Android Vendor Hooks..."
           scripts/config --file out/.config -e CONFIG_ANDROID_VENDOR_HOOKS
           
-          # 3. PERUBAAN 3: Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
+          # 3. Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
           echo "🔧 [4/4] Menonaktifkan System Trusted Keys..."
           scripts/config --file out/.config --set-str SYSTEM_TRUSTED_KEYS ""
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
           
           echo "✅ Konfigurasi kernel selesai."
 
-      # PERUBAAN 4: Step baru untuk memperbaiki error driver secara otomatis
+      # Step ini yang DIPERBAIKI
       - name: Fix Driver Compilation Error
         run: |
           echo "🔨 Memperbaiki error driver thermal..."
-          # Memodifikasi file thermal_zone_internal.h
-          # Menambahkan #ifdef CONFIG_ANDROID_VENDOR_HOOKS di sekitar baris yang bermasalah
-          # Ini memastikan kode hanya dikompilasi jika Vendor Hooks diaktifkan
+          # PERBAIKAN: Menggunakan sed yang lebih robust untuk membungkus seluruh blok kode
+          # yang menggunakan Vendor Hooks
           sed -i '/ret = register_trace_android_vh_disable_thermal_cooling_stats(/i\
           #ifdef CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
-          sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
-          #endif' drivers/thermal/qcom/thermal_zone_internal.h
+          sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/,/);$/a\
+          #endif // CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
           echo "✅ Driver diperbaiki."
 
       - name: Build Kernel Image & DTB
