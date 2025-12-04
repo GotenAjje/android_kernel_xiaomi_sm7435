@@ -48,23 +48,27 @@ jobs:
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
           # --- PERUBAHAN KRUSIAL: Gunakan defconfig yang benar ---
-          echo "🔧 [1/4] Menggunakan vendor/garnet_GKI.config yang ada di repository kernel"
+          echo "🔧 [1/5] Menggunakan vendor/garnet_GKI.config yang ada di repository kernel"
           make O=out ARCH=arm64 LLVM=1 vendor/garnet_GKI.config
           
           # --- Custom Configs ---
           
           # 1. Set Kernel Name (Branding)
-          echo "🔧 [2/4] Menerapkan branding kernel..."
+          echo "🔧 [2/5] Menerapkan branding kernel..."
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Aktifkan Vendor Hooks (sudah aktif di garnet_defconfig, tapi untuk jaga-jaga)
-          echo "🔧 [3/4] Memastikan Android Vendor Hooks aktif..."
+          # 2. Aktifkan Vendor Hooks
+          echo "🔧 [3/5] Memastikan Android Vendor Hooks aktif..."
           scripts/config --file out/.config -e CONFIG_ANDROID_VENDOR_HOOKS
           
           # 3. Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
-          echo "🔧 [4/4] Menonaktifkan System Trusted Keys..."
+          echo "🔧 [4/5] Menonaktifkan System Trusted Keys..."
           scripts/config --file out/.config --set-str SYSTEM_TRUSTED_KEYS ""
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
+          
+          # 4. PERBAIKAN BARU: Aktifkan PINCTRL untuk memenuhi dependency driver fingerprint
+          echo "🔧 [5/5] Mengaktifkan CONFIG_PINCTRL untuk fingerprint driver..."
+          scripts/config --file out/.config -e CONFIG_PINCTRL
           
           echo "✅ Konfigurasi kernel selesai."
 
@@ -87,11 +91,7 @@ jobs:
           sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
           #endif // CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
           
-          # 3. PERBAIKAN BARU: Tambahkan header yang hilang untuk driver fingerprint
-          echo "  -> Memperbaiki gf_spi.c untuk menambahkan header pinctrl..."
-          sed -i '/#include <linux\/spi\/spi.h>/a #include <linux/pinctrl/consumer.h>' drivers/input/fingerprint/goodix_fod_G3S/gf_spi.c
-          
-          echo "✅ Semua driver error telah diperbaiki."
+          echo "✅ Perbaikan driver selesai."
 
       - name: Build Kernel Image & DTB
         run: |
