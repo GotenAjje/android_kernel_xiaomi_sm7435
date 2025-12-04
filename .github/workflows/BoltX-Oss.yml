@@ -1,4 +1,4 @@
-name: Build BoltX-Oss Vanilla Kernel (OSS)
+name: Build BoltX-Oss Kernel 5.10 (SM7435)
 
 on:
   workflow_dispatch:
@@ -8,15 +8,15 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # Branding kernel diubah menjadi BoltX-Oss
+      # Branding kernel
       KERNEL_NAME: "BoltX-Oss"
       
     steps:
-      - name: Checkout Source Code
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          # Pastikan untuk checkout ke branch yang Anda inginkan
-          ref: android14-6.1 # Ganti jika branch Anda berbeda
+          # Menggunakan branch lineage-23.0 untuk Android 15
+          ref: lineage-23.0
           submodules: recursive
           fetch-depth: 1
 
@@ -31,6 +31,7 @@ jobs:
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
+          # Menggunakan Clang 19 sesuai instruksi awal
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
           
           echo "Downloading Clang 19..."
@@ -46,35 +47,25 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "Generating defconfig..."
-          # !!! PENTING: Ganti 'sm7435_defconfig' dengan nama defconfig yang ada di folder 'arch/arm64/configs/' di repo Anda
+          echo "🔧 [1/3] Menggunakan defconfig dari repository: sm7435_defconfig"
           make O=out sm7435_defconfig
-
+          
           # --- Custom Configs ---
           
           # 1. Set Kernel Name (Branding)
+          echo "🔧 [2/3] Menerapkan branding kernel..."
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Configure LTO (Opsional, tapi bagus untuk performa)
-          echo "Configuring LTO..."
-          scripts/config --file out/.config \
-              -e LTO_CLANG \
-              -d LTO_NONE \
-              -e LTO_CLANG_THIN \
-              -d LTO_CLANG_FULL \
-              -e THINLTO
-
-          # 3. Disable Certificate Signing (Mencegah error keys saat build custom)
-          echo "Disabling System Trusted Keys..."
+          # 2. Disable Certificate Signing (Mencegah error keys)
+          echo "🔧 [3/3] Menonaktifkan System Trusted Keys..."
           scripts/config --file out/.config -d SYSTEM_TRUSTED_KEYS
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
           
-          echo "Final configuration check:"
-          make O=out savedefconfig
-          cat out/defconfig
+          echo "✅ Konfigurasi kernel selesai."
 
-      - name: Build Kernel Image
+      - name: Build Kernel Image & DTB
         run: |
+          # Set Path dan Environment
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
           export ARCH=arm64
           export SUBARCH=arm64
@@ -82,24 +73,93 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "Starting Build..."
-          make -j"$(nproc --all)" O=out Image
+          echo "🚀 [1/2] Memulai build kernel Image..."
+          make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE Image
+          
+          echo "🚀 [2/2] Memulai build DTB..."
+          make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE dtbs
           
       - name: Check Kernel Version Name
         run: |
-          echo "Kernel version info:"
+          echo "ℹ️ Kernel version info:"
           strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
 
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KERNEL_NAME }}-Image
+          # Nama artifact mencantumkan versi kernel untuk kejelasan
+          name: ${{ env.KERNEL_NAME }}-5.10-Image
           path: out/arch/arm64/boot/Image
           compression-level: 9
           
-      - name: Upload DTB (jika ada)
+      - name: Upload DTB
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.KERNEL_NAME }}-DTB
+          name: ${{ env.KERNEL_NAME }}-5.10-DTB
           path: out/arch/arm64/boot/dts/qcom/
-          if-no-files-found: warn # Tidak akan error jika DTB tidak ditemukan
+          if-no-files-found: warn
+          
+      - name: Create AnyKernel3 Flashable Zip
+        run: |
+          echo "📦 Membuat flashable zip AnyKernel3..."
+          # Clone AnyKernel3 template
+          git clone https://github.com/osm0sis/AnyKernel3 -b master AnyKernel3
+          
+          # Copy kernel image
+          cp out/arch/arm64/boot/Image AnyKernel3/
+          
+          # Copy semua DTB ke folder AnyKernel3
+          mkdir -p AnyKernel3/dtbs
+          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
+          
+          # Update anykernel.sh untuk perangkat SM7435
+          cat > AnyKernel3/anykernel.sh << 'EOF'
+          # AnyKernel3 Ramdisk Mod Script
+          # by osm0sis @ xda-developers
+
+          ## AnyKernel3 install
+          ## AnyKernel3 flashable zip installer for Xiaomi SM7435 (garnet)
+
+          ## shell variables
+          block=/dev/block/by-name/boot;
+          is_device_device=1;
+          do_addon=1;
+          addon_file=ramdisk-compat.cpio;
+
+          ## dump boot and decompress
+          dump_boot;
+
+          ## patch ramdisk
+          if [ -f $ramdisk/compat.ko ]; then
+            ui_print "Found compat.ko in ramdisk, moving to /system/lib/modules/";
+            mkdir -p $ramdisk/system/lib/modules/;
+            mv $ramdisk/compat.ko $ramdisk/system/lib/modules/;
+          fi;
+
+          ## write modules to ramdisk modules dir
+          if [ -d $ramdisk/modules ]; then
+            ui_print "Adding modules to ramdisk modules dir...";
+            for i in $(find modules -name '*.ko'); do
+              chmod 644 $i;
+              mv $i $ramdisk/modules/;
+            done;
+          fi;
+
+          ## write boot image
+          write_boot;
+
+          ## end install
+          EOF
+          
+          # Buat zip
+          cd AnyKernel3
+          zip -r9 ../BoltX-Oss-5.10.zip *
+          cd ..
+          echo "✅ Flashable zip berhasil dibuat: BoltX-Oss-5.10.zip"
+          
+      - name: Upload AnyKernel3 Flashable Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.KERNEL_NAME }}-5.10-Flashable
+          path: BoltX-Oss-5.10.zip
+          compression-level: 0 # File sudah terkompresi
