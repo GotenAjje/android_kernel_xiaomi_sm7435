@@ -20,6 +20,14 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      # --- LANGKAH BARU: Checkout Device Repository untuk mendapatkan defconfig ---
+      - name: Checkout Device Repository
+        uses: actions/checkout@v4
+        with:
+          repository: GotenAjje/android_device_xiaomi_garnet
+          path: device_repo # Checkout ke folder 'device_repo'
+          ref: lineage-23.0
+
       - name: Install Dependencies
         run: |
           echo "Installing build dependencies..."
@@ -47,8 +55,13 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🔧 [1/4] Menggunakan defconfig SPESIFIK untuk Garnet (dari repository device)"
-          # PERBAIKAN KRUSIAL: Menggunakan garnet_defconfig yang benar, bukan defconfig generik
+          # --- PERBAIKAN KRUSIAL: Salin defconfig dari repo device ---
+          echo "🔨 Menyalin garnet_defconfig dari repository device..."
+          cp device_repo/garnet_defconfig arch/arm64/configs/
+          echo "✅ garnet_defconfig berhasil disalin."
+          
+          echo "🔧 [1/4] Menggunakan defconfig SPESIFIK untuk Garnet"
+          # Sekarang perintah ini akan berhasil karena filenya sudah ada
           make O=out ARCH=arm64 LLVM=1 garnet_defconfig
           
           # --- Custom Configs ---
