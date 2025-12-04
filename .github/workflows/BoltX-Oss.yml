@@ -61,10 +61,16 @@ jobs:
           echo "🔧 [3/3] Menonaktifkan System Trusted Keys..."
           scripts/config --file out/.config -d SYSTEM_TRUSTED_KEYS
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
+          scripts/config --file out/.config -d MODULE_SIG
+          scripts/config --file out/.config -d MODULE_SIG_ALL
+          scripts/config --file out/.config -d SYSTEM_BLACKLIST_KEYRING
+          scripts/config --file out/.config -d SYSTEM_BLACKLIST_HASH_LIST
+          scripts/config --file out/.config -d SYSTEM_TRUSTED_KEYRING
+          scripts/config --file out/.config -d SECONDARY_TRUSTED_KEYRING
           
           echo "✅ Konfigurasi kernel selesai."
 
-      - name: Build Kernel Image & DTB
+      - name: Build Kernel Image
         run: |
           # Set Path dan Environment
           export PATH="$(pwd)/toolchain/clang/bin:$PATH"
@@ -74,11 +80,8 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🚀 [1/2] Memulai build kernel Image..."
+          echo "🚀 Memulai build kernel Image..."
           make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE Image
-          
-          echo "🚀 [2/2] Memulai build DTB..."
-          make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE dtbs
           
       - name: Check Kernel Version Name
         run: |
@@ -93,13 +96,6 @@ jobs:
           path: out/arch/arm64/boot/Image
           compression-level: 9
           
-      - name: Upload DTB
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.KERNEL_NAME }}-5.10-DTB
-          path: out/arch/arm64/boot/dts/qcom/
-          if-no-files-found: warn
-          
       - name: Create AnyKernel3 Flashable Zip
         run: |
           echo "📦 Membuat flashable zip AnyKernel3..."
@@ -108,10 +104,6 @@ jobs:
           
           # Copy kernel image
           cp out/arch/arm64/boot/Image AnyKernel3/
-          
-          # Copy semua DTB ke folder AnyKernel3
-          mkdir -p AnyKernel3/dtbs
-          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
           
           # Buat zip dengan nama kernel branding
           cd AnyKernel3
