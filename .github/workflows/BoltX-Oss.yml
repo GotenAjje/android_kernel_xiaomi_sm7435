@@ -1,0 +1,105 @@
+name: Build BoltX-Oss Vanilla Kernel (OSS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      # Branding kernel diubah menjadi BoltX-Oss
+      KERNEL_NAME: "BoltX-Oss"
+      
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          # Pastikan untuk checkout ke branch yang Anda inginkan
+          ref: android14-6.1 # Ganti jika branch Anda berbeda
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install Dependencies
+        run: |
+          echo "Installing build dependencies..."
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
+          python3 python3-pip lld zip unzip libncurses5-dev \
+          libelf-dev zlib1g-dev dwarves
+
+      - name: Setup Toolchain (Clang 19)
+        run: |
+          mkdir -p toolchain/clang
+          CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
+          
+          echo "Downloading Clang 19..."
+          curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
+          
+      - name: Prepare & Configure Kernel
+        run: |
+          # Set Path dan Environment
+          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export LLVM=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          
+          echo "Generating defconfig..."
+          # !!! PENTING: Ganti 'sm7435_defconfig' dengan nama defconfig yang ada di folder 'arch/arm64/configs/' di repo Anda
+          make O=out sm7435_defconfig
+
+          # --- Custom Configs ---
+          
+          # 1. Set Kernel Name (Branding)
+          scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
+          
+          # 2. Configure LTO (Opsional, tapi bagus untuk performa)
+          echo "Configuring LTO..."
+          scripts/config --file out/.config \
+              -e LTO_CLANG \
+              -d LTO_NONE \
+              -e LTO_CLANG_THIN \
+              -d LTO_CLANG_FULL \
+              -e THINLTO
+
+          # 3. Disable Certificate Signing (Mencegah error keys saat build custom)
+          echo "Disabling System Trusted Keys..."
+          scripts/config --file out/.config -d SYSTEM_TRUSTED_KEYS
+          scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
+          
+          echo "Final configuration check:"
+          make O=out savedefconfig
+          cat out/defconfig
+
+      - name: Build Kernel Image
+        run: |
+          export PATH="$(pwd)/toolchain/clang/bin:$PATH"
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export LLVM=1
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CLANG_TRIPLE=aarch64-linux-gnu-
+          
+          echo "Starting Build..."
+          make -j"$(nproc --all)" O=out Image
+          
+      - name: Check Kernel Version Name
+        run: |
+          echo "Kernel version info:"
+          strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.KERNEL_NAME }}-Image
+          path: out/arch/arm64/boot/Image
+          compression-level: 9
+          
+      - name: Upload DTB (jika ada)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.KERNEL_NAME }}-DTB
+          path: out/arch/arm64/boot/dts/qcom/
+          if-no-files-found: warn # Tidak akan error jika DTB tidak ditemukan
