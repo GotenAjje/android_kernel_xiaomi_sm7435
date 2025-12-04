@@ -87,6 +87,10 @@ jobs:
           sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
           #endif // CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
           
+          # 3. PERBAIKAN BARU: Tambahkan header yang hilang untuk driver fingerprint
+          echo "  -> Memperbaiki gf_spi.c untuk menambahkan header pinctrl..."
+          sed -i '/#include <linux\/spi\/spi.h>/a #include <linux/pinctrl/consumer.h>' drivers/input/fingerprint/goodix_fod_G3S/gf_spi.c
+          
           echo "✅ Semua driver error telah diperbaiki."
 
       - name: Build Kernel Image & DTB
