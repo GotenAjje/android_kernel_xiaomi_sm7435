@@ -15,14 +15,12 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          # Menggunakan branch lineage-23.0 untuk Android 15 ,16
           ref: lineage-23.0
           submodules: recursive
           fetch-depth: 1
 
       - name: Install Dependencies
         run: |
-          echo "Installing build dependencies..."
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev git curl \
           python3 python3-pip lld zip unzip libncurses5-dev \
@@ -31,9 +29,7 @@ jobs:
       - name: Setup Toolchain (Clang 19)
         run: |
           mkdir -p toolchain/clang
-          # Menggunakan Clang 19 sesuai permintaan
           CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main-kernel-2025/clang-r536225.tar.gz"
-          
           echo "Downloading Clang 19..."
           curl -L "${CLANG_URL}" | tar -xz -C toolchain/clang
           
@@ -47,51 +43,17 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          # --- PERUBAHAN KRUSIAL: Gunakan defconfig yang benar ---
-          echo "🔧 [1/5] Menggunakan vendor/garnet_GKI.config yang ada di repository kernel"
+          echo "🔧 Menggunakan defconfig yang benar: vendor/garnet_GKI.config"
           make O=out ARCH=arm64 LLVM=1 vendor/garnet_GKI.config
           
-          # --- Custom Configs ---
-          
-          # 1. Set Kernel Name (Branding)
-          echo "🔧 [2/5] Menerapkan branding kernel..."
+          echo "🔧 Menerapkan branding kernel..."
           scripts/config --file out/.config --set-str LOCALVERSION "-${KERNEL_NAME}"
           
-          # 2. Aktifkan Vendor Hooks
-          echo "🔧 [3/5] Memastikan Android Vendor Hooks aktif..."
-          scripts/config --file out/.config -e CONFIG_ANDROID_VENDOR_HOOKS
-          
-          # 3. Nonaktifkan System Trusted Keys dengan benar untuk mencegah prompt interaktif
-          echo "🔧 [4/5] Menonaktifkan System Trusted Keys..."
+          echo "🔧 Menonaktifkan System Trusted Keys untuk mencegah error..."
           scripts/config --file out/.config --set-str SYSTEM_TRUSTED_KEYS ""
           scripts/config --file out/.config -d SYSTEM_REVOCATION_KEYS
           
-          # 4. PERBAIKAN BARU: Aktifkan PINCTRL untuk memenuhi dependency driver fingerprint
-          echo "🔧 [5/5] Mengaktifkan CONFIG_PINCTRL untuk fingerprint driver..."
-          scripts/config --file out/.config -e CONFIG_PINCTRL
-          
           echo "✅ Konfigurasi kernel selesai."
-
-      - name: Fix Driver Compilation Errors
-        run: |
-          echo "🔨 Memperbaiki bug di driver untuk kompatibilitas Clang 19..."
-          
-          # 1. Perbaiki error 'void function should not return a value' di driver MMC
-          echo "  -> Memperbaiki sdhci-msm.c (line 2872)..."
-          # Mengganti 'return 0;' dengan 'return;' pada fungsi bertipe void
-          sed -i '2872s/return 0;/return;/' drivers/mmc/host/sdhci-msm.c
-          
-          # 2. Perbaiki error syntax dan #endif di driver thermal
-          echo "  -> Memperbaiki thermal_zone_internal.h..."
-          # Membungkus kode yang menggunakan Vendor Hooks dengan #ifdef untuk mencegah error
-          sed -i '/#include <trace\/hooks\/thermal.h>/i\
-          \
-          #ifdef CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
-          # Cari baris unregister dan tambahkan #endif setelahnya
-          sed -i '/unregister_trace_android_vh_disable_thermal_cooling_stats(/a\
-          #endif // CONFIG_ANDROID_VENDOR_HOOKS' drivers/thermal/qcom/thermal_zone_internal.h
-          
-          echo "✅ Perbaikan driver selesai."
 
       - name: Build Kernel Image & DTB
         run: |
@@ -103,13 +65,13 @@ jobs:
           export CROSS_COMPILE=aarch64-linux-gnu-
           export CLANG_TRIPLE=aarch64-linux-gnu-
           
-          echo "🚀 [1/2] Memulai build kernel Image..."
+          echo "🚀 [1/2] Building kernel Image..."
           make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE Image
           
-          echo "🚀 [2/2] Memulai build DTB..."
+          echo "🚀 [2/2] Building DTB..."
           make -j"$(nproc --all)" O=out LLVM=1 CLANG_TRIPLE=$CLANG_TRIPLE CROSS_COMPILE=$CROSS_COMPILE dtbs
           
-      - name: Check Kernel Version Name
+      - name: Check Kernel Version
         run: |
           echo "ℹ️ Kernel version info:"
           strings out/arch/arm64/boot/Image | grep "Linux version" | head -n 1
@@ -133,11 +95,14 @@ jobs:
           echo "📦 Membuat flashable zip AnyKernel3..."
           git clone https://github.com/osm0sis/AnyKernel3.git -b master AnyKernel3
           
+          # Salin Image
           cp out/arch/arm64/boot/Image AnyKernel3/
           
+          # Salin semua DTB
           mkdir -p AnyKernel3/dtbs
           find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cp {} AnyKernel3/dtbs/ \;
           
+          # Buat zip
           cd AnyKernel3
           zip -r9 ../${{ env.KERNEL_NAME }}-5.10-garnet.zip *
           cd ..
